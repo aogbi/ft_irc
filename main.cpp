@@ -12,8 +12,9 @@ int main(int ac, char **av)
 		my_server.create_socket();
 		my_server.set_socket_options();
 		my_server.bind_socket();
+		my_server.listen_socket();
 		std::cout << "Server started on port " << config.port << std::endl;
-
+		my_server.run();
 	}
 	catch (const std::exception& e)
 	{

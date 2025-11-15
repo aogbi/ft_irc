@@ -6,12 +6,23 @@
 #include <iostream>
 #include <fcntl.h>
 #include <unistd.h>
+#include <poll.h>
+#include <vector>
+#include <cstring>
+#include <cerrno>
 
 class server{
 	private:
 	int server_fd;
 	int port;
 	std::string password;
+
+
+
+	std::vector<pollfd> poll_fds;
+	void accept_new_client();
+
+
 
 	public:
 	server(int port, const std::string& password);
@@ -22,6 +33,10 @@ class server{
 
 	void set_socket_options();
 	void bind_socket();
+	void listen_socket();
+	void setup_poll();
+	void run();
+
 	~server();
 };
 
