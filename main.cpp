@@ -2,6 +2,9 @@
 #include <string>
 #include "parser.hpp"
 #include "Server.hpp"
+#include "ClientManager.hpp"
+#include "ChannelManager.hpp"
+
 
 int main(int ac, char **av)
 {
@@ -9,11 +12,13 @@ int main(int ac, char **av)
 	{
 		ServerConfig config = parse_arguments(ac, av);
 		server my_server(config.port, config.password);
-		my_server.create_socket();
-		my_server.set_socket_options();
-		my_server.bind_socket();
-		my_server.listen_socket();
-		std::cout << "Server started on port " << config.port << std::endl;
+		ClientManager client_manager;
+		ChannelManager channel_manager;
+		
+		
+		my_server.setClientManager(&client_manager);
+		my_server.setChannelManager(&channel_manager);
+		my_server.setup();
 		my_server.run();
 	}
 	catch (const std::exception& e)

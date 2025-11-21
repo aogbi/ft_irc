@@ -10,6 +10,8 @@
 #include <vector>
 #include <cstring>
 #include <cerrno>
+#include "ClientManager.hpp"
+#include "ChannelManager.hpp"
 
 class server{
 	private:
@@ -17,12 +19,11 @@ class server{
 	int port;
 	std::string password;
 
-
-
 	std::vector<pollfd> poll_fds;
 	void accept_new_client();
 
-
+	ClientManager* client_manager;
+	ChannelManager* channel_manager;
 
 	public:
 	server(int port, const std::string& password);
@@ -35,7 +36,11 @@ class server{
 	void bind_socket();
 	void listen_socket();
 	void setup_poll();
+	void	setup();
 	void run();
+
+	void setClientManager(ClientManager* cm);
+	void setChannelManager(ChannelManager* chm);
 
 	~server();
 };

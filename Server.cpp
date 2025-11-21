@@ -113,6 +113,22 @@ void server::accept_new_client()
 	}
 }
 
+void server::setClientManager(ClientManager* cm) {
+	client_manager = cm;
+}
+
+void server::setChannelManager(ChannelManager* chm) {
+	channel_manager = chm;
+}
+
+void	server::setup()
+{
+		create_socket();
+		set_socket_options();
+		bind_socket();
+		listen_socket();
+		std::cout << "Server started on port " << port << std::endl;
+}
 
 void server::run()
 {

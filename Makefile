@@ -3,9 +3,13 @@ CXX = c++
 CXXFLAGS = -Wall -Wextra -Werror -std=c++98
 RM = rm -f
 
-SRC = main.cpp \
-		parser.cpp \
-        Server.cpp
+SRC = Server.cpp \
+	  Client.cpp \
+	  ClientManager.cpp \
+	  ChannelManager.cpp \
+	  Channel.cpp \
+	  parser.cpp \
+	  main.cpp
 
 OBJ = $(SRC:.cpp=.o)
 
