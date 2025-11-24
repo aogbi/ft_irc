@@ -21,6 +21,7 @@ void ClientManager::addClient(Client* client) {
 void ClientManager::removeClient(int fd) {
     std::map<int, Client*>::iterator it = _clients.find(fd);
     if (it != _clients.end()) {
+        it->second->disconnect();
         delete it->second;
         _clients.erase(it);
     }

@@ -15,9 +15,6 @@ int main(int ac, char **av)
 		ClientManager client_manager;
 		ChannelManager channel_manager;
 		
-		
-		my_server.setClientManager(&client_manager);
-		my_server.setChannelManager(&channel_manager);
 		my_server.setup();
 		my_server.run();
 	}

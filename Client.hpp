@@ -3,11 +3,11 @@
 
 #include <string>
 #include <vector>
+#include <iostream>
 
 class Client {
 private:
     int         _fd;
-    std::string _ip;
     bool        _registered;
     bool        _hasPass;
 
@@ -22,19 +22,29 @@ private:
 public:
     // Constructors / Destructor
     Client();
-    Client(int fd, const std::string& ip);
+    Client(int fd);
     ~Client();
 
     // --- Getters
     int                 getFd() const;
-    const std::string&  getIp() const;
     const std::string&  getNick() const;
     const std::string&  getUser() const;
     const std::string&  getRealName() const;
     const std::string&  getHost() const;
+    const std::string&  getRecvBuffer() const;
 
     bool isRegistered() const;
     bool hasPass() const;
+
+    // --- Message handling
+    void handlePassword(const std::string &pass);
+    void handleNick(const std::string &nick);
+    void handleUser(const std::string &user);
+    void handleJoin(const std::string &channelName);
+    void handlePart(const std::string &channelName);
+    void handlePrivateMessage(const std::string &message);
+    void handleQuit(const std::string &message);
+    void sendUnknownCommand(const std::string &Command);
 
     // --- Setters
     void setNick(const std::string& nick);
@@ -48,6 +58,7 @@ public:
     void appendToRecv(const std::string& data);
     bool hasCompleteMessage() const;
     std::string popMessage();
+    void handleClientMessage(const std::string &msg);
 
     void queueSend(const std::string& msg);
     std::string flushSend();

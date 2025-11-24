@@ -1,6 +1,6 @@
 NAME = ircserv
 CXX = c++
-CXXFLAGS = -Wall -Wextra -Werror -std=c++98
+CXXFLAGS =  -std=c++98 # -Wall -Wextra -Werror
 RM = rm -f
 
 SRC = Server.cpp \
@@ -9,7 +9,8 @@ SRC = Server.cpp \
 	  ChannelManager.cpp \
 	  Channel.cpp \
 	  parser.cpp \
-	  main.cpp
+	  main.cpp \
+	  ParsedCommand.cpp
 
 OBJ = $(SRC:.cpp=.o)
 
