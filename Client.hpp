@@ -1,9 +1,17 @@
 #ifndef CLIENT_HPP
 #define CLIENT_HPP
 
-#include <string>
 #include <vector>
 #include <iostream>
+#include <unistd.h> // close()
+#include <sys/socket.h> // send()
+#include "ChannelManager.hpp"
+#include "ClientManager.hpp"
+#include "ParsedCommand.hpp"
+
+// Forward declarations to avoid including manager headers in this header
+class ChannelManager;
+class ClientManager;
 
 class Client {
 private:
@@ -37,11 +45,11 @@ public:
     bool hasPass() const;
 
     // --- Message handling
-    void handlePassword(const std::string &pass);
-    void handleNick(const std::string &nick);
-    void handleUser(const std::string &user);
-    void handleJoin(const std::string &channelName);
-    void handlePart(const std::string &channelName);
+    void handlePassword(const std::string &pass, ClientManager *client_manager);
+    void handleNick(const std::string &nick, ClientManager *client_manager);
+    void handleUser(const std::string &user, ClientManager *client_manager);
+    void handleJoin(const std::string &channelName, ChannelManager *channel_manager);
+    void handlePart(const std::string &channelName, ChannelManager *channel_manager);
     void handlePrivateMessage(const std::string &message);
     void handleQuit(const std::string &message);
     void sendUnknownCommand(const std::string &Command);
@@ -58,7 +66,7 @@ public:
     void appendToRecv(const std::string& data);
     bool hasCompleteMessage() const;
     std::string popMessage();
-    void handleClientMessage(const std::string &msg);
+    void handleClientMessage(const std::string &msg, ChannelManager *channel_manager, ClientManager *client_manager);
 
     void queueSend(const std::string& msg);
     std::string flushSend();
@@ -68,4 +76,3 @@ public:
 };
 
 #endif
-

@@ -8,9 +8,10 @@
 class ClientManager {
 private:
     std::map<int, Client*> _clients;  // fd -> Client*
+    std::string _serverPassword;
 
 public:
-    ClientManager();
+    ClientManager(std::string &serverPassword);
     ~ClientManager();
 
     // Add / remove client
@@ -20,10 +21,14 @@ public:
     // Search
     Client* getClientByFd(int fd);
     Client* getClientByNick(const std::string& nick);
+    Client* getClientByUser(const std::string& user);
 
     // Iterate / utility
     std::map<int, Client*>& getAllClients();
     bool nicknameExists(const std::string& nick) const;
+
+    // Password management
+    bool checkPassword(const std::string& pass) const;
 };
 
 #endif

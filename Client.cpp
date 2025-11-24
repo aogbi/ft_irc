@@ -1,7 +1,18 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   Client.cpp                                         :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: aogbi <aogbi@student.42.fr>                +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2025/11/24 21:57:38 by aogbi             #+#    #+#             */
+/*   Updated: 2025/11/24 23:31:50 by aogbi            ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "Client.hpp"
-#include <unistd.h> // close()
-#include "ParsedCommand.hpp"
-#include <sys/socket.h> // send()
+#include <sstream>
+#include <cctype>
 
 Client::Client() : _fd(-1), _registered(false), _hasPass(false) {}
 
@@ -69,21 +80,166 @@ void Client::sendUnknownCommand(const std::string& cmd)
     send(_fd, msg.c_str(), msg.size(), 0);
 }
 
-void Client::handlePassword(const std::string &pass) {
-
-    _hasPass = true;
+void Client::handlePassword(const std::string &pass, ClientManager *client_manager) {
+    if (!client_manager || pass.empty() || _hasPass)
+        return;
+    _hasPass = client_manager->checkPassword(pass);
+    if (_hasPass) {
+        std::string msg = ":localhost NOTICE " + _nickname + " :Password accepted\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+    } else {
+        std::string msg = ":localhost NOTICE " + _nickname + " :Password rejected\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+    }
 }
 
-void Client::handleNick(const std::string &nick) {
+// Validate nickname against basic IRC rules:
+// must start with a letter (A-Za-z), followed by letters, digits or the characters -[]\\^{}
+static bool isValidNick(const std::string &nick) {
+    if (nick.empty()) return false;
+    for (size_t i = 0; i < nick.size(); ++i) {
+        char c = nick[i];
+        if (c == ' ') return false;
+        if (i == 0) {
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))) return false;
+        } else {
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                (c >= '0' && c <= '9') || c == '-' || c == '[' || c == ']' ||
+                c == '\\' || c == '^' || c == '{' || c == '}') {
+                continue;
+            }
+            return false;
+        }
+    }
+    return true;
+}
+
+// Validate username: no spaces, must start with a letter, followed by letters, digits, '.', '-', '_' allowed
+static bool isValidUser(const std::string &u) {
+    if (u.empty()) return false;
+    if (!std::isalpha(static_cast<unsigned char>(u[0]))) return false;
+    for (size_t i = 0; i < u.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(u[i]);
+        if (c == ' ') return false;
+        if (std::isalnum(c) || u[i] == '.' || u[i] == '-' || u[i] == '_')
+            continue;
+        return false;
+    }
+    return true;
+}
+
+void Client::handleNick(const std::string &nick, ClientManager *client_manager) {
+    if (!_hasPass)
+    {
+        std::string msg = ":localhost NOTICE * :You must set password first\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+
+    if (nick.empty() || _nickname == nick)
+        return;
+
+    if (!isValidNick(nick)) {
+        std::string msg = ":localhost 432 * " + nick + " :Erroneous nickname\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+
+    if (client_manager && client_manager->nicknameExists(nick)) {
+        std::string msg = ":localhost 433 * " + nick + " :Nickname is already in use\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+
     _nickname = nick;
+    // If username already set, registering is complete
+    if (!_username.empty())
+        _registered = true;
 }
 
-void Client::handleUser(const std::string &user) {
-    _username = user;
+void Client::handleUser(const std::string &params, ClientManager *client_manager) {
+    // Expected params format: <username> <mode> <unused> :<realname>
+    // Example: "ayoub 0 * :Ayoub Ogbi"
+    if (!_hasPass)
+    {
+        std::string msg = ":localhost NOTICE * :You must set password first\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+
+    if (params.empty() || _registered)
+        return;
+
+    // Parse params: must be exactly 4 parameters and the last must start with ':'
+    std::istringstream iss(params);
+    std::string username, mode, unused;
+    if (!(iss >> username >> mode >> unused)) {
+        std::string msg = ":localhost NOTICE * :Invalid USER format\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return; // malformed or missing fields
+    }
+
+    // Now get the realname token which must begin with ':' and may contain spaces
+    std::string realnameToken;
+    if (!(iss >> realnameToken)) {
+        std::string msg = ":localhost NOTICE * :Invalid USER format (missing realname)\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+    if (realnameToken.empty() || realnameToken[0] != ':') {
+        std::string msg = ":localhost NOTICE * :Invalid USER format (realname must start with ':')\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+
+    std::string rest;
+    std::getline(iss, rest); // remaining part of realname (may contain spaces)
+    if (!rest.empty() && rest[0] == ' ')
+        rest.erase(0, 1);
+    std::string realname = realnameToken.substr(1) + rest;
+
+    if (username.empty())
+        return;
+
+    if (!isValidUser(username)) {
+        std::string msg = ":localhost NOTICE * :Invalid username\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+
+    // Check if username already used
+    if (client_manager && client_manager->getClientByUser(username))
+    {
+        std::string msg = ":localhost 433 * " + username + " :Username is already in use\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+
+    _username = username;
+    _realname = realname;
+
+    std::string msg = ":localhost NOTICE " + _nickname + " :User registered\r\n";
+    send(_fd, msg.c_str(), msg.size(), 0);
+
+    if (!_nickname.empty())
+        _registered = true;
 }
 
-void Client::handleJoin(const std::string &channelName) {
-    // Implement join channel logic
+void Client::handleJoin(const std::string *channelName, ChannelManager *channel_manager) {
+    if (!channel_manager) return;
+    else if (channelName->empty()) return;
+    else if (!isRegistered)
+    {
+        std::string msg = ":localhost NOTICE * :You must be registered to join channels\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+    Channel *channel = channel_manager->getChannelByName(channelName);
+    if (!channel) {
+        channel = channel_manager->createChannel(channelName);
+    }
+
+    channel->addClient(this);
 }
 
 void Client::handlePart(const std::string &channelName) {
@@ -99,18 +255,28 @@ void Client::handleQuit(const std::string &message) {
 }
 
 
-void Client::handleClientMessage(const std::string &msg) {
-    ParsedCommand cmd(msg);
+void Client::handleClientMessage(const std::string &msg, ChannelManager *channel_manager, ClientManager *client_manager) {
+    ParsedCommand parsed(msg);
+    std::string command = parsed.getCommand();
+    std::string params = parsed.getParams();
 
-    if (cmd.getCommand() == "PASS") handlePassword(cmd.getParams());
-    else if (cmd.getCommand() == "NICK") handleNick(cmd.getParams());
-    else if (cmd.getCommand() == "USER") handleUser(cmd.getParams());
-    else if (cmd.getCommand() == "JOIN") handleJoin(cmd.getParams());
-    else if (cmd.getCommand() == "PART") handlePart(cmd.getParams());
-    else if (cmd.getCommand() == "PRIVMSG") handlePrivateMessage(cmd.getParams());
-    else if (cmd.getCommand() == "QUIT") handleQuit(cmd.getParams());
-    else
-        sendUnknownCommand(cmd.getCommand());
+    if (command == "PASS") {
+        handlePassword(params, client_manager);
+    } else if (command == "NICK") {
+        handleNick(params, client_manager);
+    } else if (command == "USER") {
+        handleUser(params, client_manager);
+    } else if (command == "JOIN") {
+        handleJoin(&params, channel_manager);
+    } else if (command == "PART") {
+        handlePart(params);
+    } else if (command == "PRIVMSG") {
+        handlePrivateMessage(params);
+    } else if (command == "QUIT") {
+        handleQuit(params);
+    } else {
+        sendUnknownCommand(command);
+    }
 }
 
 void Client::disconnect() {

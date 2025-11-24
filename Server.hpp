@@ -22,8 +22,8 @@ class server{
 	std::vector<pollfd> poll_fds;
 	void accept_new_client();
 
-	ClientManager client_manager;
-	ChannelManager channel_manager;
+	ClientManager *client_manager;
+	ChannelManager *channel_manager;
 
 	public:
 	server(int port, const std::string& password);

@@ -1,6 +1,6 @@
 #include "ClientManager.hpp"
 
-ClientManager::ClientManager() {}
+ClientManager::ClientManager(std::string &serverPassword) : _serverPassword(serverPassword){}
 
 ClientManager::~ClientManager() {
     // Clean up all client objects
@@ -45,6 +45,15 @@ Client* ClientManager::getClientByNick(const std::string& nick) {
     return NULL;
 }
 
+Client* ClientManager::getClientByUser(const std::string& user) {
+    std::map<int, Client*>::iterator it;
+    for (it = _clients.begin(); it != _clients.end(); ++it) {
+        if (it->second->getUser() == user)
+            return it->second;
+    }
+    return NULL;
+}
+
 // --- Utilities
 
 std::map<int, Client*>& ClientManager::getAllClients() {
@@ -58,5 +67,9 @@ bool ClientManager::nicknameExists(const std::string& nick) const {
             return true;
     }
     return false;
+}
+
+bool ClientManager::checkPassword(const std::string& pass) const {
+    return pass == _serverPassword;
 }
 

@@ -12,9 +12,6 @@ int main(int ac, char **av)
 	{
 		ServerConfig config = parse_arguments(ac, av);
 		server my_server(config.port, config.password);
-		ClientManager client_manager;
-		ChannelManager channel_manager;
-		
 		my_server.setup();
 		my_server.run();
 	}

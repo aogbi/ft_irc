@@ -8,6 +8,8 @@ server::server(int port, const std::string& password)
 	this->port = port;
 	this->password = password;
 	this->server_fd = -1;
+	client_manager = new ClientManager(this->password);
+	channel_manager = new ChannelManager();
 }
 server::server(const server& other)
 {
@@ -102,7 +104,7 @@ void server::accept_new_client()
 	p.events = POLLIN;
 	p.revents = 0;
 	poll_fds.push_back(p);
-	client_manager.addClient(new Client(client_fd));
+	client_manager->addClient(new Client(client_fd));
 	char	ip[INET_ADDRSTRLEN];
 	if (inet_ntop(AF_INET, &(client_addr.sin_addr), ip, sizeof(ip)) != NULL)
 	{
@@ -112,14 +114,6 @@ void server::accept_new_client()
 	{
 		std::cout << "New connection (fd=" << client_fd << ")\n";
 	}
-}
-
-void server::setClientManager(ClientManager cm) {
-	client_manager = cm;
-}
-
-void server::setChannelManager(ChannelManager chm) {
-	channel_manager = chm;
 }
 
 void	server::setup()
@@ -160,7 +154,7 @@ void server::run()
 						// Check if real disconnect or just EAGAIN
 						if (bytes == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
 						{
-							client_manager.removeClient(poll_fds[i].fd);
+							client_manager->removeClient(poll_fds[i].fd);
 							std::cout << "Client disconnected (fd=" << poll_fds[i].fd << ")" << std::endl;
 							poll_fds.erase(poll_fds.begin() + i);
 							--i;
@@ -169,14 +163,14 @@ void server::run()
 					else
 					{
 						buffer[bytes] = '\0';
-						Client* client = client_manager.getClientByFd(poll_fds[i].fd);
+						Client* client = client_manager->getClientByFd(poll_fds[i].fd);
 						if (client)
 						{
 							client->appendToRecv(std::string(buffer, bytes));
 							while (client->hasCompleteMessage())
 							{
 								std::string msg = client->popMessage();
-								client->handleClientMessage(msg);
+								client->handleClientMessage(msg, channel_manager, client_manager);
 							}
 						}
 						else
@@ -202,4 +196,5 @@ server::~server()
 	{
 		close(server_fd);
 	}
+	delete client_manager;
 }
