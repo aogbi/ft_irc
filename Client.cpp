@@ -6,7 +6,7 @@
 /*   By: aogbi <aogbi@student.42.fr>                +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/11/24 21:57:38 by aogbi             #+#    #+#             */
-/*   Updated: 2025/11/25 03:33:15 by aogbi            ###   ########.fr       */
+/*   Updated: 2025/11/25 05:26:53 by aogbi            ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -330,11 +330,12 @@ void Client::handleJoin(const std::string &params, ChannelManager *channel_manag
             send(_fd, msg.c_str(), msg.size(), 0);
             continue;
         }
-
+        bool isOp = false;
         Channel* ch = NULL;
         if (!channel_manager->channelExists(chName)) {
             ch = new Channel(chName);
             channel_manager->addChannel(ch);
+            isOp = true;
         } else {
             ch = channel_manager->getChannel(chName);
         }
@@ -357,14 +358,14 @@ void Client::handleJoin(const std::string &params, ChannelManager *channel_manag
             send(_fd, msg.c_str(), msg.size(), 0);
             continue;
         }
-
-        // Add member: if the channel has no operators yet, make this joiner an operator
-        bool isOp = false;
-        std::map<int,bool>& existingMembers = ch->getMembers();
-        for (std::map<int,bool>::const_iterator mit = existingMembers.begin(); mit != existingMembers.end(); ++mit) {
-            if (mit->second) { isOp = true; break; }
+        // If channel is invite-only and client not invited -> ERR_INVITEONLYCHAN (473)
+        if (ch->isInviteOnly() && !ch->isInvited(_fd))
+        {
+            std::string msg = ":localhost 473 " + _nickname + " " + chName + " :Cannot join channel (+i)\r\n";
+            send(_fd, msg.c_str(), msg.size(), 0);
+            continue;
         }
-        if (!isOp && existingMembers.empty()) isOp = true;
+        // Add member to channel
         ch->addMember(_fd, isOp);
 
         // Broadcast JOIN to all members (including the joiner)
@@ -570,6 +571,120 @@ void Client::handlePrivateMessage(const std::string &params, ChannelManager *cha
     }
 }
 
+void Client::handleKick(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager) {
+    // KICK <channel>{,<channel>} <user>{,<user>} [ :<reason>]
+    if (!_hasPass) {
+        std::string msg = ":localhost NOTICE * :You must set password first\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+    if (!_registered) {
+        std::string msg = ":localhost NOTICE * :You must be registered to use KICK\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+    if (params.empty()) {
+        std::string err = ":localhost 461 " + (_nickname.empty() ? std::string("*") : _nickname) + " KICK :Not enough parameters\r\n";
+        send(_fd, err.c_str(), err.size(), 0);
+        return;
+    }
+
+    std::istringstream iss(params);
+    std::string channelsToken, usersToken;
+    if (!(iss >> channelsToken)) return;
+    if (!(iss >> usersToken)) {
+        std::string err = ":localhost 461 " + (_nickname.empty() ? std::string("*") : _nickname) + " KICK :Not enough parameters\r\n";
+        send(_fd, err.c_str(), err.size(), 0);
+        return;
+    }
+
+    // optional reason
+    std::string reason;
+    std::string reasonToken;
+    if (iss >> reasonToken) {
+        if (!reasonToken.empty() && reasonToken[0] == ':') {
+            reason = reasonToken.substr(1);
+            std::string rest;
+            std::getline(iss, rest);
+            if (!rest.empty()) {
+                if (rest[0] == ' ') rest.erase(0,1);
+                reason += rest;
+            }
+        } else {
+            reason = reasonToken;
+            std::string rest;
+            std::getline(iss, rest);
+            if (!rest.empty()) {
+                if (rest[0] == ' ') rest.erase(0,1);
+                reason += rest;
+            }
+        }
+    }
+
+    // split channels and users
+    std::vector<std::string> channels;
+    std::vector<std::string> users;
+    {
+        std::string token;
+        std::istringstream cs(channelsToken);
+        while (std::getline(cs, token, ',')) if (!token.empty()) channels.push_back(token);
+    }
+    {
+        std::string token;
+        std::istringstream us(usersToken);
+        while (std::getline(us, token, ',')) if (!token.empty()) users.push_back(token);
+    }
+
+    // Pair channels and users positionally; if counts differ, use last user for remaining channels
+    for (size_t i = 0; i < channels.size(); ++i) {
+        std::string chName = channels[i];
+        std::string targetNick = (i < users.size() ? users[i] : users.back());
+
+        Channel* ch = channel_manager ? channel_manager->getChannel(chName) : NULL;
+        if (!ch) {
+            std::string err = ":localhost 403 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + chName + " :No such channel\r\n";
+            send(_fd, err.c_str(), err.size(), 0);
+            continue;
+        }
+
+        // Must be operator to KICK
+        if (!ch->isOperator(_fd)) {
+            std::string err = ":localhost 482 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + chName + " :You're not channel operator\r\n";
+            send(_fd, err.c_str(), err.size(), 0);
+            continue;
+        }
+
+        // Find target client
+        Client* target = client_manager ? client_manager->getClientByNick(targetNick) : NULL;
+        if (!target) {
+            std::string err = ":localhost 401 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + targetNick + " :No such nick/channel\r\n";
+            send(_fd, err.c_str(), err.size(), 0);
+            continue;
+        }
+
+        if (!ch->isMember(target->getFd())) {
+            std::string err = ":localhost 441 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + targetNick + " " + chName + " :They aren't on that channel\r\n";
+            send(_fd, err.c_str(), err.size(), 0);
+            continue;
+        }
+
+        // Broadcast KICK to all members
+        std::map<int,bool> members = ch->getMembers();
+        std::string kickMsgPrefix = ":" + _nickname + "!" + _username + "@" + _hostname + " ";
+        std::string kickLine = kickMsgPrefix + "KICK " + chName + " " + targetNick;
+        if (!reason.empty()) kickLine += " :" + reason;
+        kickLine += "\r\n";
+        for (std::map<int,bool>::const_iterator mit = members.begin(); mit != members.end(); ++mit) {
+            Client* dest = client_manager ? client_manager->getClientByFd(mit->first) : NULL;
+            if (!dest) continue;
+            send(dest->getFd(), kickLine.c_str(), kickLine.size(), 0);
+        }
+
+        // Remove target from channel
+        ch->removeMember(target->getFd());
+    }
+}
+
 void Client::handleQuit(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager) {
     // Parse optional quit message
     std::string reason;
@@ -661,6 +776,12 @@ void Client::handleClientMessage(const std::string &msg, ChannelManager *channel
         handlePart(params, channel_manager, client_manager);
     } else if (command == "PRIVMSG") {
            handlePrivateMessage(params, channel_manager, client_manager);
+    } else if (command == "KICK") {
+        handleKick(params, channel_manager, client_manager);
+    } 
+    else if (command == "INVITE") {
+        // Respond
+
     } else if (command == "QUIT") {
         handleQuit(params, channel_manager, client_manager);
     } else {

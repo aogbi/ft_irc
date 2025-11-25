@@ -54,6 +54,7 @@ public:
     // params: "<channel>{,<channel>} [ :<reason>]"
     void handlePart(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
     void handlePrivateMessage(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
+    void handleKick(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
     void handleQuit(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
     void sendUnknownCommand(const std::string &Command);
 
