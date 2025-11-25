@@ -6,18 +6,22 @@
 /*   By: aogbi <aogbi@student.42.fr>                +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/11/24 21:57:38 by aogbi             #+#    #+#             */
-/*   Updated: 2025/11/24 23:31:50 by aogbi            ###   ########.fr       */
+/*   Updated: 2025/11/25 03:33:15 by aogbi            ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "Client.hpp"
+#include "ChannelManager.hpp"
+#include "ClientManager.hpp"
+#include "ParsedCommand.hpp"
 #include <sstream>
 #include <cctype>
+
 
 Client::Client() : _fd(-1), _registered(false), _hasPass(false) {}
 
 Client::Client(int fd)
-    : _fd(fd), _registered(false), _hasPass(false) {}
+    : _fd(fd), _registered(false), _hasPass(false), _shouldQuit(false) {}
 
 Client::~Client() {
     if (_fd != -1)
@@ -225,33 +229,418 @@ void Client::handleUser(const std::string &params, ClientManager *client_manager
         _registered = true;
 }
 
-void Client::handleJoin(const std::string *channelName, ChannelManager *channel_manager) {
-    if (!channel_manager) return;
-    else if (channelName->empty()) return;
-    else if (!isRegistered)
-    {
+void Client::handleJoin(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager) {
+    // Must be registered to join
+    if (!channel_manager || params.empty()) return;
+    if (!_hasPass) {
+        std::string msg = ":localhost NOTICE * :You must set password first\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+    if (!_registered) {
         std::string msg = ":localhost NOTICE * :You must be registered to join channels\r\n";
         send(_fd, msg.c_str(), msg.size(), 0);
         return;
     }
-    Channel *channel = channel_manager->getChannelByName(channelName);
-    if (!channel) {
-        channel = channel_manager->createChannel(channelName);
+
+    // Handle special case: 'JOIN 0' => part all channels
+    if (params == "0") {
+        std::map<std::string, Channel*>& all = channel_manager->getAllChannels();
+        for (std::map<std::string, Channel*>::iterator it = all.begin(); it != all.end(); ++it) {
+            Channel* ch = it->second;
+            if (ch && ch->isMember(_fd)) {
+                // Broadcast PART to channel members (include the leaver)
+                std::map<int,bool> membersCopy = ch->getMembers();
+                for (std::map<int,bool>::const_iterator mit = membersCopy.begin(); mit != membersCopy.end(); ++mit) {
+                    int memberFd = mit->first;
+                    Client* target = NULL;
+                    if (client_manager) target = client_manager->getClientByFd(memberFd);
+                    if (!target) continue;
+                    std::string prefix = ":" + _nickname + "!" + _username + "@" + _hostname + " ";
+                    std::string partMsg = prefix + "PART " + ch->getName() + "\r\n";
+                    send(target->getFd(), partMsg.c_str(), partMsg.size(), 0);
+                }
+                ch->removeMember(_fd);
+                // If no operator remains, promote the first member to operator
+                std::map<int,bool>& rem = ch->getMembers();
+                bool hasOp = false;
+                for (std::map<int,bool>::const_iterator mit = rem.begin(); mit != rem.end(); ++mit) {
+                    if (mit->second) { hasOp = true; break; }
+                }
+                if (!hasOp && !rem.empty()) {
+                    int promoteFd = rem.begin()->first;
+                    ch->setOperator(promoteFd, true);
+                    if (client_manager) {
+                        Client* promoted = client_manager->getClientByFd(promoteFd);
+                        if (promoted) {
+                            std::string modeMsg = ":localhost MODE " + ch->getName() + " +o " + promoted->getNick() + "\r\n";
+                            for (std::map<int,bool>::const_iterator mit = rem.begin(); mit != rem.end(); ++mit) {
+                                Client* t = client_manager->getClientByFd(mit->first);
+                                if (t) send(t->getFd(), modeMsg.c_str(), modeMsg.size(), 0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return;
     }
 
-    channel->addClient(this);
+    // Parse channels and optional keys
+    std::istringstream iss(params);
+    std::string chansToken;
+    if (!(iss >> chansToken)) return;
+    std::string keysToken;
+    if (!(iss >> keysToken)) keysToken = "";
+
+    // Reject if there are extra space-separated tokens beyond channels and optional keys
+    std::string extraToken;
+    if (iss >> extraToken) {
+        std::string msg = ":localhost NOTICE " + _nickname + " :Too many parameters for JOIN\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+
+    // split by commas
+    std::vector<std::string> channels;
+    std::vector<std::string> keys;
+    {
+        std::string token;
+        std::istringstream cs(chansToken);
+        while (std::getline(cs, token, ',')) {
+            if (!token.empty()) channels.push_back(token);
+        }
+    }
+    if (!keysToken.empty()) {
+        std::string token;
+        std::istringstream ks(keysToken);
+        while (std::getline(ks, token, ',')) {
+            keys.push_back(token);
+        }
+    }
+
+    // Keys may be fewer than channels; missing keys are treated as empty (no key provided).
+    // A provided key is applied positionally to the corresponding channel.
+
+    for (size_t i = 0; i < channels.size(); ++i) {
+        std::string chName = channels[i];
+        // basic validation: channel must start with '#'
+        if (chName.empty() || chName[0] != '#') {
+            std::string msg = ":localhost NOTICE " + _nickname + " :Invalid channel name " + chName + "\r\n";
+            send(_fd, msg.c_str(), msg.size(), 0);
+            continue;
+        }
+
+        Channel* ch = NULL;
+        if (!channel_manager->channelExists(chName)) {
+            ch = new Channel(chName);
+            channel_manager->addChannel(ch);
+        } else {
+            ch = channel_manager->getChannel(chName);
+        }
+
+        if (!ch) continue;
+
+        if (ch->isMember(_fd)) continue; // already in
+
+        // Determine provided key (if any)
+        std::string providedKey = (i < keys.size() ? keys[i] : "");
+
+        // If channel newly created and a key was provided, set it
+        if (ch->getKey().empty() && !providedKey.empty()) {
+            ch->setKey(providedKey);
+        }
+
+        // If channel has a key and provided key doesn't match -> ERR_BADCHANNELKEY (475)
+        if (!ch->getKey().empty() && ch->getKey() != providedKey) {
+            std::string msg = ":localhost 475 " + _nickname + " " + chName + " :Cannot join channel (+k)\r\n";
+            send(_fd, msg.c_str(), msg.size(), 0);
+            continue;
+        }
+
+        // Add member: if the channel has no operators yet, make this joiner an operator
+        bool isOp = false;
+        std::map<int,bool>& existingMembers = ch->getMembers();
+        for (std::map<int,bool>::const_iterator mit = existingMembers.begin(); mit != existingMembers.end(); ++mit) {
+            if (mit->second) { isOp = true; break; }
+        }
+        if (!isOp && existingMembers.empty()) isOp = true;
+        ch->addMember(_fd, isOp);
+
+        // Broadcast JOIN to all members (including the joiner)
+        std::map<int,bool>& members = ch->getMembers();
+        for (std::map<int,bool>::const_iterator mit = members.begin(); mit != members.end(); ++mit) {
+            int memberFd = mit->first;
+            Client* target = NULL;
+            if (client_manager) target = client_manager->getClientByFd(memberFd);
+            if (!target) continue;
+            std::string prefix = ":" + _nickname + "!" + _username + "@" + _hostname + " ";
+            std::string joinMsg = prefix + "JOIN " + chName + "\r\n";
+            send(target->getFd(), joinMsg.c_str(), joinMsg.size(), 0);
+        }
+
+        // Send TOPIC (332) to the joiner
+        std::string topicMsg = ":localhost 332 " + _nickname + " " + chName + " :" + ch->getTopic() + "\r\n";
+        send(_fd, topicMsg.c_str(), topicMsg.size(), 0);
+
+        // Send NAMES (353) and end (366)
+        std::string namesList;
+        for (std::map<int,bool>::const_iterator mit = members.begin(); mit != members.end(); ++mit) {
+            Client* memberClient = NULL;
+            if (client_manager) memberClient = client_manager->getClientByFd(mit->first);
+            if (memberClient) {
+                if (!namesList.empty()) namesList += " ";
+                namesList += memberClient->getNick();
+            }
+        }
+        std::string namesMsg = ":localhost 353 " + _nickname + " = " + chName + " :" + namesList + "\r\n";
+        send(_fd, namesMsg.c_str(), namesMsg.size(), 0);
+        std::string endNames = ":localhost 366 " + _nickname + " " + chName + " :End of /NAMES list.\r\n";
+        send(_fd, endNames.c_str(), endNames.size(), 0);
+    }
 }
 
-void Client::handlePart(const std::string &channelName) {
-    // Implement part channel logic
+void Client::handlePart(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager) {
+    if (!channel_manager) return;
+    if (params.empty()) return;
+
+    // Parse channels list and optional reason
+    std::istringstream iss(params);
+    std::string chansToken;
+    if (!(iss >> chansToken)) return;
+
+    std::string reason;
+    std::string reasonToken;
+    if (iss >> reasonToken) {
+        if (!reasonToken.empty() && reasonToken[0] == ':') {
+            reason = reasonToken.substr(1);
+            std::string rest;
+            std::getline(iss, rest);
+            if (!rest.empty()) {
+                if (rest[0] == ' ') rest.erase(0, 1);
+                reason += rest;
+            }
+        } else {
+            reason = reasonToken;
+            std::string rest;
+            std::getline(iss, rest);
+            if (!rest.empty()) {
+                if (rest[0] == ' ') rest.erase(0, 1);
+                reason += rest;
+            }
+        }
+    }
+
+    // Split channel list by comma and part each
+    std::istringstream cs(chansToken);
+    std::string chName;
+    while (std::getline(cs, chName, ',')) {
+        if (chName.empty()) continue;
+        Channel* ch = channel_manager->getChannel(chName);
+        if (!ch) continue;
+        if (!ch->isMember(_fd)) continue;
+
+        // Broadcast PART to all members (including the leaver)
+        std::map<int,bool> membersCopy = ch->getMembers();
+        for (std::map<int,bool>::const_iterator mit = membersCopy.begin(); mit != membersCopy.end(); ++mit) {
+            int memberFd = mit->first;
+            Client* target = NULL;
+            if (client_manager) target = client_manager->getClientByFd(memberFd);
+            if (!target) continue;
+            std::string prefix = ":" + _nickname + "!" + _username + "@" + _hostname + " ";
+            std::string partMsg = prefix + "PART " + ch->getName();
+            if (!reason.empty()) partMsg += " :" + reason;
+            partMsg += "\r\n";
+            send(target->getFd(), partMsg.c_str(), partMsg.size(), 0);
+        }
+        ch->removeMember(_fd);
+        // If no operator remains, promote the first member to operator
+        std::map<int,bool>& rem2 = ch->getMembers();
+        bool hasOp2 = false;
+        for (std::map<int,bool>::const_iterator mit = rem2.begin(); mit != rem2.end(); ++mit) {
+            if (mit->second) { hasOp2 = true; break; }
+        }
+        if (!hasOp2 && !rem2.empty()) {
+            int promoteFd2 = rem2.begin()->first;
+            ch->setOperator(promoteFd2, true);
+            if (client_manager) {
+                Client* promoted2 = client_manager->getClientByFd(promoteFd2);
+                if (promoted2) {
+                    std::string modeMsg2 = ":localhost MODE " + ch->getName() + " +o " + promoted2->getNick() + "\r\n";
+                    for (std::map<int,bool>::const_iterator mit = rem2.begin(); mit != rem2.end(); ++mit) {
+                        Client* t = client_manager->getClientByFd(mit->first);
+                        if (t) send(t->getFd(), modeMsg2.c_str(), modeMsg2.size(), 0);
+                    }
+                }
+            }
+        }
+    }
 }
 
-void Client::handlePrivateMessage(const std::string &message) {
-    // Implement private message logic
+// removed old single-arg overload; new implementation below
+
+void Client::handlePrivateMessage(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager) {
+    // PRIVMSG <target>{,<target>} :<message>
+    if (!_hasPass)
+    {
+        std::string msg = ":localhost NOTICE * :You must set password first\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+    if (!_registered) {
+        std::string msg = ":localhost NOTICE * :You must be registered to send messages\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+    if (params.empty()) return;
+
+    std::istringstream iss(params);
+    std::string targetsToken;
+    if (!(iss >> targetsToken)) return;
+
+    // Extract message (rest of the line). It may start with ':'
+    std::string msgToken;
+    std::string message;
+    if (std::getline(iss, msgToken)) {
+        if (!msgToken.empty() && msgToken[0] == ' ') msgToken.erase(0, 1);
+        if (!msgToken.empty() && msgToken[0] == ':') message = msgToken.substr(1);
+        else message = msgToken;
+    }
+
+    if (message.empty()) {
+        // ERR_NOTEXTTOSEND (412)
+        std::string err = ":localhost 412 ";
+        err += (_nickname.empty() ? "*" : _nickname) + " :No text to send\r\n";
+        send(_fd, err.c_str(), err.size(), 0);
+        return;
+    }
+
+    // split targets by comma
+    std::istringstream ts(targetsToken);
+    std::string target;
+    while (std::getline(ts, target, ',')) {
+        if (target.empty()) continue;
+
+        if (target[0] == '#') {
+            // Channel target
+            if (!channel_manager) continue;
+            Channel* ch = channel_manager->getChannel(target);
+            if (!ch) {
+                // No such channel
+                std::string err = ":localhost 401 ";
+                err += (_nickname.empty() ? "*" : _nickname) + " " + target + " :No such nick/channel\r\n";
+                send(_fd, err.c_str(), err.size(), 0);
+                continue;
+            }
+            if (!ch->isMember(_fd)) {
+                // Cannot send to channel (not a member)
+                std::string err = ":localhost 404 ";
+                err += (_nickname.empty() ? "*" : _nickname) + " " + target + " :Cannot send to channel\r\n";
+                send(_fd, err.c_str(), err.size(), 0);
+                continue;
+            }
+
+            // Send to all members except sender
+            std::map<int,bool> members = ch->getMembers();
+            for (std::map<int,bool>::const_iterator mit = members.begin(); mit != members.end(); ++mit) {
+                int memberFd = mit->first;
+                if (memberFd == _fd) continue;
+                Client* dest = NULL;
+                if (client_manager) dest = client_manager->getClientByFd(memberFd);
+                if (!dest) continue;
+                std::string prefix = ":" + (_nickname.empty() ? std::string("*") : _nickname) + "!" + _username + "@" + _hostname + " ";
+                std::string out = prefix + "PRIVMSG " + target + " :" + message + "\r\n";
+                send(dest->getFd(), out.c_str(), out.size(), 0);
+            }
+        } else {
+            // User target
+            if (!client_manager) continue;
+            Client* dest = client_manager->getClientByNick(target);
+            if (!dest) {
+                std::string err = ":localhost 401 ";
+                err += (_nickname.empty() ? "*" : _nickname) + " " + target + " :No such nick/channel\r\n";
+                send(_fd, err.c_str(), err.size(), 0);
+                continue;
+            }
+            // Send to the user
+            std::string prefix = ":" + (_nickname.empty() ? std::string("*") : _nickname) + "!" + _username + "@" + _hostname + " ";
+            std::string out = prefix + "PRIVMSG " + target + " :" + message + "\r\n";
+            send(dest->getFd(), out.c_str(), out.size(), 0);
+        }
+    }
 }
 
-void Client::handleQuit(const std::string &message) {
-    // Implement quit logic
+void Client::handleQuit(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager) {
+    // Parse optional quit message
+    std::string reason;
+    if (!params.empty()) {
+        std::istringstream iss(params);
+        std::string token;
+        if (iss >> token) {
+            if (!token.empty() && token[0] == ':') {
+                reason = token.substr(1);
+                std::string rest;
+                std::getline(iss, rest);
+                if (!rest.empty()) {
+                    if (rest[0] == ' ') rest.erase(0, 1);
+                    reason += rest;
+                }
+            } else {
+                reason = token;
+                std::string rest;
+                std::getline(iss, rest);
+                if (!rest.empty()) {
+                    if (rest[0] == ' ') rest.erase(0, 1);
+                    reason += rest;
+                }
+            }
+        }
+    }
+
+    std::string quitMsg = ":" + (_nickname.empty() ? std::string("*") : _nickname) + "!" + _username + "@" + _hostname + " QUIT";
+    if (!reason.empty()) quitMsg += " :" + reason;
+    quitMsg += "\r\n";
+
+    // Notify all channels where this client is a member
+    if (channel_manager && client_manager) {
+        std::map<std::string, Channel*>& all = channel_manager->getAllChannels();
+        for (std::map<std::string, Channel*>::iterator it = all.begin(); it != all.end(); ++it) {
+            Channel* ch = it->second;
+            if (!ch) continue;
+            if (!ch->isMember(_fd)) continue;
+            std::map<int,bool> membersCopy = ch->getMembers();
+            for (std::map<int,bool>::const_iterator mit = membersCopy.begin(); mit != membersCopy.end(); ++mit) {
+                int memberFd = mit->first;
+                Client* target = client_manager->getClientByFd(memberFd);
+                if (!target) continue;
+                send(target->getFd(), quitMsg.c_str(), quitMsg.size(), 0);
+            }
+            ch->removeMember(_fd);
+            // If no operator remains, promote the first member to operator
+            std::map<int,bool>& rem3 = ch->getMembers();
+            bool hasOp3 = false;
+            for (std::map<int,bool>::const_iterator mit = rem3.begin(); mit != rem3.end(); ++mit) {
+                if (mit->second) { hasOp3 = true; break; }
+            }
+            if (!hasOp3 && !rem3.empty()) {
+                int promoteFd3 = rem3.begin()->first;
+                ch->setOperator(promoteFd3, true);
+                Client* promoted3 = client_manager->getClientByFd(promoteFd3);
+                if (promoted3) {
+                    std::string modeMsg3 = ":localhost MODE " + ch->getName() + " +o " + promoted3->getNick() + "\r\n";
+                    for (std::map<int,bool>::const_iterator mit = rem3.begin(); mit != rem3.end(); ++mit) {
+                        Client* t = client_manager->getClientByFd(mit->first);
+                        if (t) send(t->getFd(), modeMsg3.c_str(), modeMsg3.size(), 0);
+                    }
+                }
+            }
+        }
+        // Mark client for removal by server loop; server will call ClientManager::removeClient
+        markForQuit();
+        return;
+    }
+    // If we don't have managers, just close socket
+    disconnect();
 }
 
 
@@ -267,13 +656,13 @@ void Client::handleClientMessage(const std::string &msg, ChannelManager *channel
     } else if (command == "USER") {
         handleUser(params, client_manager);
     } else if (command == "JOIN") {
-        handleJoin(&params, channel_manager);
+        handleJoin(params, channel_manager, client_manager);
     } else if (command == "PART") {
-        handlePart(params);
+        handlePart(params, channel_manager, client_manager);
     } else if (command == "PRIVMSG") {
-        handlePrivateMessage(params);
+           handlePrivateMessage(params, channel_manager, client_manager);
     } else if (command == "QUIT") {
-        handleQuit(params);
+        handleQuit(params, channel_manager, client_manager);
     } else {
         sendUnknownCommand(command);
     }
@@ -282,5 +671,13 @@ void Client::handleClientMessage(const std::string &msg, ChannelManager *channel
 void Client::disconnect() {
     close(_fd);
     _fd = -1;
+}
+
+void Client::markForQuit() {
+    _shouldQuit = true;
+}
+
+bool Client::shouldQuit() const {
+    return _shouldQuit;
 }
 

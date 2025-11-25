@@ -4,12 +4,12 @@
 #include <string>
 #include <map>
 #include <set>
-
 class Client; // forward declaration
 
 class Channel {
 private:
     std::string             _name;
+    std::string             _key;
     std::string             _topic;
     std::map<int, bool>     _members;     // fd -> isOperator
     std::set<int>           _invited;     // fds allowed to join
@@ -27,6 +27,7 @@ public:
     // Basic getters
     const std::string& getName() const;
     const std::string& getTopic() const;
+    const std::string& getKey() const;
 
     bool isInviteOnly() const;
     bool topicRestricted() const;
@@ -38,11 +39,14 @@ public:
 
     // Member operations
     void addMember(int fd, bool isOp);
+    void addClient(Client* client); // convenience method
     void removeMember(int fd);
     std::map<int,bool>& getMembers();
 
     // Topic
     void setTopic(const std::string& topic);
+    void setKey(const std::string& key);
+    void setOperator(int fd, bool isOp);
 
     // Modes
     void setInviteOnly(bool enable);

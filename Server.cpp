@@ -1,4 +1,5 @@
 #include "Server.hpp"
+#include "Client.hpp"
 #include <stdexcept>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -171,6 +172,14 @@ void server::run()
 							{
 								std::string msg = client->popMessage();
 								client->handleClientMessage(msg, channel_manager, client_manager);
+								// If the client marked itself for quit, remove it and its pollfd here
+								if (client->shouldQuit()) {
+									client_manager->removeClient(poll_fds[i].fd);
+									std::cout << "Client quit (fd=" << poll_fds[i].fd << ")" << std::endl;
+									poll_fds.erase(poll_fds.begin() + i);
+									--i;
+									break; // stop processing this fd
+								}
 							}
 						}
 						else

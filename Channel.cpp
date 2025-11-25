@@ -1,4 +1,5 @@
 #include "Channel.hpp"
+#include "Client.hpp"
 
 // Constructors
 Channel::Channel()
@@ -23,6 +24,10 @@ const std::string& Channel::getName() const {
 
 const std::string& Channel::getTopic() const {
     return _topic;
+}
+
+const std::string& Channel::getKey() const {
+    return _key;
 }
 
 bool Channel::isInviteOnly() const {
@@ -59,6 +64,11 @@ void Channel::addMember(int fd, bool isOp) {
     _members[fd] = isOp;
 }
 
+void Channel::addClient(Client* client) {
+    if (client)
+        addMember(client->getFd(), false);
+}
+
 void Channel::removeMember(int fd) {
     _members.erase(fd);
     _invited.erase(fd);
@@ -73,6 +83,16 @@ std::map<int,bool>& Channel::getMembers() {
 
 void Channel::setTopic(const std::string& topic) {
     _topic = topic;
+}
+
+void Channel::setKey(const std::string& key) {
+    _key = key;
+}
+
+void Channel::setOperator(int fd, bool isOp) {
+    std::map<int,bool>::iterator it = _members.find(fd);
+    if (it != _members.end())
+        it->second = isOp;
 }
 
 

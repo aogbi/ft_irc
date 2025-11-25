@@ -1,4 +1,5 @@
 #include "ClientManager.hpp"
+#include "Client.hpp"
 
 ClientManager::ClientManager(std::string &serverPassword) : _serverPassword(serverPassword){}
 

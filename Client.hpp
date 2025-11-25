@@ -1,23 +1,25 @@
 #ifndef CLIENT_HPP
 #define CLIENT_HPP
 
+#include <string>
 #include <vector>
 #include <iostream>
 #include <unistd.h> // close()
 #include <sys/socket.h> // send()
-#include "ChannelManager.hpp"
-#include "ClientManager.hpp"
-#include "ParsedCommand.hpp"
+#include <map>
+#include <sstream>
+#include <cctype>
 
-// Forward declarations to avoid including manager headers in this header
 class ChannelManager;
 class ClientManager;
+class ParsedCommand;
 
 class Client {
 private:
     int         _fd;
     bool        _registered;
     bool        _hasPass;
+    bool        _shouldQuit;
 
     std::string _nickname;
     std::string _username;
@@ -48,10 +50,11 @@ public:
     void handlePassword(const std::string &pass, ClientManager *client_manager);
     void handleNick(const std::string &nick, ClientManager *client_manager);
     void handleUser(const std::string &user, ClientManager *client_manager);
-    void handleJoin(const std::string &channelName, ChannelManager *channel_manager);
-    void handlePart(const std::string &channelName, ChannelManager *channel_manager);
-    void handlePrivateMessage(const std::string &message);
-    void handleQuit(const std::string &message);
+    void handleJoin(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
+    // params: "<channel>{,<channel>} [ :<reason>]"
+    void handlePart(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
+    void handlePrivateMessage(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
+    void handleQuit(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
     void sendUnknownCommand(const std::string &Command);
 
     // --- Setters
@@ -67,6 +70,9 @@ public:
     bool hasCompleteMessage() const;
     std::string popMessage();
     void handleClientMessage(const std::string &msg, ChannelManager *channel_manager, ClientManager *client_manager);
+
+    void markForQuit();
+    bool shouldQuit() const;
 
     void queueSend(const std::string& msg);
     std::string flushSend();

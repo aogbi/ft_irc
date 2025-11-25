@@ -1,6 +1,7 @@
 NAME = ircserv
 CXX = c++
-CXXFLAGS =  -std=c++98 # -Wall -Wextra -Werror
+CXXFLAGS =  -std=c++98 -fPIE #-Wall -Wextra -Werror
+LDFLAGS = -pie
 RM = rm -f
 
 SRC = Server.cpp \
@@ -17,7 +18,7 @@ OBJ = $(SRC:.cpp=.o)
 all: $(NAME)
 
 $(NAME): $(OBJ)
-	$(CXX) $(CXXFLAGS) $(OBJ) -o $(NAME)
+	$(CXX) $(CXXFLAGS) $(OBJ) $(LDFLAGS) -o $(NAME)
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@

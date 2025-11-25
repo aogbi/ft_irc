@@ -3,7 +3,8 @@
 
 #include <map>
 #include <string>
-#include "Client.hpp"
+
+class Client; // forward declaration to avoid circular include
 
 class ClientManager {
 private:
