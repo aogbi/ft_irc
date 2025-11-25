@@ -6,7 +6,7 @@
 /*   By: aogbi <aogbi@student.42.fr>                +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/11/24 21:57:38 by aogbi             #+#    #+#             */
-/*   Updated: 2025/11/25 05:26:53 by aogbi            ###   ########.fr       */
+/*   Updated: 2025/11/25 07:08:39 by aogbi            ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -685,6 +685,74 @@ void Client::handleKick(const std::string &params, ChannelManager *channel_manag
     }
 }
 
+void Client::handleInvite(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager) {
+    // INVITE <nick> <channel>
+    if (!_hasPass) {
+        std::string msg = ":localhost NOTICE * :You must set password first\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+    if (!_registered) {
+        std::string msg = ":localhost NOTICE * :You must be registered to use INVITE\r\n";
+        send(_fd, msg.c_str(), msg.size(), 0);
+        return;
+    }
+    if (params.empty()) {
+        std::string err = ":localhost 461 " + (_nickname.empty() ? std::string("*") : _nickname) + " INVITE :Not enough parameters\r\n";
+        send(_fd, err.c_str(), err.size(), 0);
+        return;
+    }
+
+    std::istringstream iss(params);
+    std::string targetNick, channelName;
+    if (!(iss >> targetNick >> channelName)) {
+        std::string err = ":localhost 461 " + (_nickname.empty() ? std::string("*") : _nickname) + " INVITE :Not enough parameters\r\n";
+        send(_fd, err.c_str(), err.size(), 0);
+        return;
+    }
+
+    if (!client_manager) return;
+    Client* target = client_manager->getClientByNick(targetNick);
+    if (!target) {
+        std::string err = ":localhost 401 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + targetNick + " :No such nick/channel\r\n";
+        send(_fd, err.c_str(), err.size(), 0);
+        return;
+    }
+
+    if (!channel_manager) return;
+    Channel* ch = channel_manager->getChannel(channelName);
+    if (!ch) {
+        std::string err = ":localhost 403 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + channelName + " :No such channel\r\n";
+        send(_fd, err.c_str(), err.size(), 0);
+        return;
+    }
+
+    // Inviter must be on the channel
+    if (!ch->isMember(_fd)) {
+        std::string err = ":localhost 442 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + channelName + " :You're not on that channel\r\n";
+        send(_fd, err.c_str(), err.size(), 0);
+        return;
+    }
+
+    // If target already on channel
+    if (ch->isMember(target->getFd())) {
+        std::string err = ":localhost 443 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + targetNick + " " + channelName + " :is already on channel\r\n";
+        send(_fd, err.c_str(), err.size(), 0);
+        return;
+    }
+
+    // Add to invite list
+    ch->inviteUser(target->getFd());
+
+    // Notify target of invite
+    std::string inviteMsg = ":" + _nickname + "!" + _username + "@" + _hostname + " INVITE " + targetNick + " :" + channelName + "\r\n";
+    send(target->getFd(), inviteMsg.c_str(), inviteMsg.size(), 0);
+
+    // Send RPL_INVITING (341) to inviter
+    std::string rpl = ":localhost 341 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + targetNick + " " + channelName + "\r\n";
+    send(_fd, rpl.c_str(), rpl.size(), 0);
+}
+
 void Client::handleQuit(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager) {
     // Parse optional quit message
     std::string reason;
@@ -778,10 +846,8 @@ void Client::handleClientMessage(const std::string &msg, ChannelManager *channel
            handlePrivateMessage(params, channel_manager, client_manager);
     } else if (command == "KICK") {
         handleKick(params, channel_manager, client_manager);
-    } 
-    else if (command == "INVITE") {
-        // Respond
-
+    } else if (command == "INVITE") {
+        handleInvite(params, channel_manager, client_manager);
     } else if (command == "QUIT") {
         handleQuit(params, channel_manager, client_manager);
     } else {
