@@ -51,12 +51,13 @@ public:
     void handleNick(const std::string &nick, ClientManager *client_manager);
     void handleUser(const std::string &user, ClientManager *client_manager);
     void handleJoin(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
-    // params: "<channel>{,<channel>} [ :<reason>]"
     void handlePart(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
     void handlePrivateMessage(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
     void handleKick(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
     void handleInvite(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
     void handleQuit(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
+    void handleTopic(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
+    void handleMode(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
     void sendUnknownCommand(const std::string &Command);
 
     // --- Setters
