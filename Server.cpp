@@ -94,9 +94,9 @@ void server::accept_new_client()
 	if (client_fd < 0)
 	{
 		// Don't throw on EAGAIN (normal for non-blocking)
-		if (11 == EAGAIN)
+		if (errno == EAGAIN)
 			return;
-		std::cerr << "accept() failed: " << strerror(11) << std::endl;
+		std::cerr << "accept() failed: " << strerror(errno) << std::endl;
 		return;
 	}
 	if (fcntl(client_fd, F_SETFL, O_NONBLOCK) < 0)
@@ -166,7 +166,7 @@ void server::run()
 					if (bytes <= 0)
 					{
 						// Check if real disconnect or just EAGAIN
-						if (bytes == 0 || (11 != EAGAIN && 11 != EWOULDBLOCK))
+						if (bytes == 0 || (errno != EWOULDBLOCK))
 						{
 							Client* client = client_manager->getClientByFd(poll_fds[i].fd);
 							Channel* ch;
