@@ -6,7 +6,7 @@
 /*   By: aogbi <aogbi@student.42.fr>                +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/11/24 21:57:38 by aogbi             #+#    #+#             */
-/*   Updated: 2025/11/27 05:51:58 by aogbi            ###   ########.fr       */
+/*   Updated: 2025/11/27 06:17:39 by aogbi            ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -831,13 +831,15 @@ void Client::handleMode(const std::string &params, ChannelManager *channel_manag
 		send(_fd, err.c_str(), err.size(), 0);
 		return;
 	}
+
+	if (!ch->isOperator(_fd)) {
+		std::string err = ":localhost 482 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + channelName + " :You're not channel operator\r\n";
+		send(_fd, err.c_str(), err.size(), 0);
+		return;
+	}
+	
 	std::string modeChanges;
 	if (iss >> modeChanges) {
-		if (!ch->isOperator(_fd)) {
-			std::string err = ":localhost 482 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + channelName + " :You're not channel operator\r\n";
-			send(_fd, err.c_str(), err.size(), 0);
-			return;
-		}
 		bool adding = true;
 		if (modeChanges.empty()) return;
 		if (modeChanges[0] != '+' && modeChanges[0] != '-') {
