@@ -165,8 +165,9 @@ void server::run()
 					int bytes = recv(poll_fds[i].fd, buffer, sizeof(buffer) - 1, 0);
 					if (bytes <= 0)
 					{
-						// Check if real disconnect or just EAGAIN
-						if (bytes == 0 || (errno != EWOULDBLOCK))
+						if (errno == EWOULDBLOCK)
+							continue;
+						else if (bytes == 0)
 						{
 							Client* client = client_manager->getClientByFd(poll_fds[i].fd);
 							Channel* ch;
