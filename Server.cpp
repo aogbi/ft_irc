@@ -39,9 +39,8 @@ int server::create_socket()
 	if (server_fd < 0){
 		throw std::runtime_error("Failed to create socket");
 	}
-	int flags = fcntl(server_fd, F_GETFL, 0);
-	if (flags != -1)
-		fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
+	if (fcntl(server_fd, F_SETFL, O_NONBLOCK) < 0)
+        throw std::runtime_error("Failed to set non-blocking mode");
 	return server_fd;
 }
 void  server::set_socket_options()
@@ -94,15 +93,14 @@ void server::accept_new_client()
 	int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &len);
 	if (client_fd < 0)
 	{
-		// Don't throw on EAGAIN/EWOULDBLOCK (normal for non-blocking)
-		if (errno == EAGAIN || errno == EWOULDBLOCK)// back to that to check it again
+		// Don't throw on EAGAIN (normal for non-blocking)
+		if (11 == EAGAIN)
 			return;
-		std::cerr << "accept() failed: " << strerror(errno) << std::endl;
+		std::cerr << "accept() failed: " << strerror(11) << std::endl;
 		return;
 	}
-	int flags = fcntl(client_fd, F_GETFL, 0);// still need explanation about this
-	if (flags != -1)
-		fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
+	if (fcntl(client_fd, F_SETFL, O_NONBLOCK) < 0)
+        throw std::runtime_error("Failed to set non-blocking mode");
 	//add client to poll_fds
 	struct pollfd p;
 	p.fd = client_fd;
@@ -144,7 +142,7 @@ void server::run()
 		int num_fds = static_cast<int>(poll_fds.size());
 		int ready_fd = poll(&poll_fds[0], num_fds, -1);
 		if (ready_fd < 0) {
-			if (errno == EINTR) {
+			if (4 == EINTR) {
 				// interrupted by signal; check running flag
 				if (!g_running) break;
 				continue;
@@ -168,7 +166,7 @@ void server::run()
 					if (bytes <= 0)
 					{
 						// Check if real disconnect or just EAGAIN
-						if (bytes == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
+						if (bytes == 0 || (11 != EAGAIN && 11 != EWOULDBLOCK))
 						{
 							Client* client = client_manager->getClientByFd(poll_fds[i].fd);
 							Channel* ch;
