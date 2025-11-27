@@ -6,7 +6,7 @@
 /*   By: aogbi <aogbi@student.42.fr>                +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/11/24 21:57:38 by aogbi             #+#    #+#             */
-/*   Updated: 2025/11/27 04:16:28 by aogbi            ###   ########.fr       */
+/*   Updated: 2025/11/27 05:11:24 by aogbi            ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -370,6 +370,11 @@ void Client::handleJoin(const std::string &params, ChannelManager *channel_manag
 		if (ch->isInviteOnly() && !ch->isInvited(_fd))
 		{
 			std::string msg = ":localhost 473 " + _nickname + " " + chName + " :Cannot join channel (+i)\r\n";
+			send(_fd, msg.c_str(), msg.size(), 0);
+			continue;
+		}
+		if( ch->getUserLimit() > 0 && static_cast<int>(ch->getMembers().size()) >= ch->getUserLimit()) {
+			std::string msg = ":localhost 471 " + _nickname + " " + chName + " :Cannot join channel (+l)\r\n";
 			send(_fd, msg.c_str(), msg.size(), 0);
 			continue;
 		}
@@ -826,13 +831,13 @@ void Client::handleMode(const std::string &params, ChannelManager *channel_manag
 		send(_fd, err.c_str(), err.size(), 0);
 		return;
 	}
-	if (!ch->isOperator(_fd)) {
-		std::string err = ":localhost 482 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + channelName + " :You're not channel operator\r\n";
-		send(_fd, err.c_str(), err.size(), 0);
-		return;
-	}
 	std::string modeChanges;
 	if (iss >> modeChanges) {
+		if (!ch->isOperator(_fd)) {
+			std::string err = ":localhost 482 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + channelName + " :You're not channel operator\r\n";
+			send(_fd, err.c_str(), err.size(), 0);
+			return;
+		}
 		bool adding = true;
 		if (modeChanges.empty()) return;
 		if (modeChanges[0] != '+' && modeChanges[0] != '-') {
@@ -926,6 +931,11 @@ void Client::handleMode(const std::string &params, ChannelManager *channel_manag
 				return;
 			}
 		}
+	}
+	else {
+		std::string currentModes = ch->getModeString();
+		std::string modeMsg = ":localhost 324 " + (_nickname.empty() ? std::string("*") : _nickname) + " " + ch->getName() + " " + currentModes + "\r\n";
+		send(_fd, modeMsg.c_str(), modeMsg.size(), 0);
 	}
 }
 

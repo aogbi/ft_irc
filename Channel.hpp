@@ -35,6 +35,7 @@ public:
     bool isInviteOnly() const;
     bool topicRestricted() const;
     int  getUserLimit() const;
+    std::string getModeString() const;
 
     bool isMember(int fd) const;
     bool isOperator(int fd) const;

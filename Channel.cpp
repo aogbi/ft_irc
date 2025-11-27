@@ -90,6 +90,30 @@ void Channel::removeMember(int fd, ClientManager* client_manager, bool notify) {
 		}
 }
 
+std::string Channel::getModeString() const {
+    std::string modes = "+";
+    bool any = false;
+    std::ostringstream params;
+
+    if (_isInviteOnly) {
+        modes += 'i'; any = true;
+    }
+    if (_hasTopicRestriction) {
+        modes += 't'; any = true;
+    }
+    if (!_key.empty()) {
+        modes += 'k'; any = true;
+        params << ' ' << _key;
+    }
+    if (_userLimit > 0) {
+        modes += 'l'; any = true;
+        params << ' ' << _userLimit;
+    }
+
+    if (!any) return std::string("+");
+    return modes + params.str();
+}
+
 std::map<int,bool>& Channel::getMembers() {
     return _members;
 }
