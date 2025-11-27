@@ -6,7 +6,7 @@
 /*   By: aogbi <aogbi@student.42.fr>                +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/11/24 21:57:38 by aogbi             #+#    #+#             */
-/*   Updated: 2025/11/27 05:11:24 by aogbi            ###   ########.fr       */
+/*   Updated: 2025/11/27 05:42:45 by aogbi            ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -177,7 +177,7 @@ void Client::handleNick(const std::string &nick, ChannelManager *channel_manager
 			if (!ch) continue;
 			if (!ch->isMember(_fd)) continue;
 			std::string nickMsg = ":" + oldNick + "!" + _username + "@" + _hostname + " NICK :" + _nickname + "\r\n";
-			ch->broadcast(nickMsg, client_manager, _fd);
+			ch->broadcast(nickMsg, client_manager, -1);
 		}
 	}
 
