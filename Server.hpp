@@ -10,6 +10,12 @@
 #include <vector>
 #include <cstring>
 #include <cerrno>
+#include "Client.hpp"
+#include <stdexcept>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <signal.h>
+#include <map>
 #include "ClientManager.hpp"
 #include "ChannelManager.hpp"
 

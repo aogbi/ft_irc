@@ -4,7 +4,7 @@ ChannelManager::ChannelManager() {}
 
 ChannelManager::~ChannelManager() {
     // Clean up all channel objects
-    std::map<std::string, Channel*>::iterator it;
+    std::map<std::string, Channel*>::iterator it = _channels.begin();
     for (it = _channels.begin(); it != _channels.end(); ++it) {
         delete it->second;
     }

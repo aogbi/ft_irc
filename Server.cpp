@@ -1,8 +1,12 @@
 #include "Server.hpp"
-#include "Client.hpp"
-#include <stdexcept>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+
+static volatile sig_atomic_t g_running = 1;
+
+static void server_signal_handler(int sig)
+{
+	if (sig == SIGINT || sig == SIGTERM)
+		g_running = 0;
+}
 
 server::server(int port, const std::string& password)
 {
@@ -119,23 +123,34 @@ void server::accept_new_client()
 
 void	server::setup()
 {
-		create_socket();
-		set_socket_options();
-		bind_socket();
-		listen_socket();
-		std::cout << "Server started on port " << port << std::endl;
+    // Install signal handlers: graceful shutdown on SIGINT/SIGTERM, ignore SIGPIPE
+    signal(SIGINT, server_signal_handler);
+    signal(SIGTERM, server_signal_handler);
+    signal(SIGPIPE, SIG_IGN);
+	create_socket();
+	set_socket_options();
+	bind_socket();
+	listen_socket();
+	std::cout << "Server started on port " << port << std::endl;
 }
 
 void server::run()
 {
 	setup_poll();
 	std::cout << "Server running on port " << port << std::endl;
-	while (true)
+
+	while (g_running)
 	{
 		int num_fds = static_cast<int>(poll_fds.size());
 		int ready_fd = poll(&poll_fds[0], num_fds, -1);
-		if (ready_fd < 0)
+		if (ready_fd < 0) {
+			if (errno == EINTR) {
+				// interrupted by signal; check running flag
+				if (!g_running) break;
+				continue;
+			}
 			throw std::runtime_error("poll() failed");
+		}
 		for(size_t i = 0; i < poll_fds.size(); ++i)
 		{
 			if (poll_fds[i].revents & POLLIN)
@@ -155,8 +170,20 @@ void server::run()
 						// Check if real disconnect or just EAGAIN
 						if (bytes == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
 						{
+							Client* client = client_manager->getClientByFd(poll_fds[i].fd);
+							Channel* ch;
+							std::map<std::string, Channel*>& all = channel_manager->getAllChannels();
+							for (std::map<std::string, Channel*>::iterator it = all.begin(); it != all.end(); ++it) {
+								ch = it->second;
+								if (ch->isMember(poll_fds[i].fd)) {
+									ch->removeMember(poll_fds[i].fd, client_manager, true);
+									std::string quitMsg = ":" + (client->getNick().empty() ? std::string("*") : client->getNick()) + "!" + client->getUser() + "@" + client->getHost() + " QUIT\r\n";
+									ch->broadcast(quitMsg, client_manager, poll_fds[i].fd);
+								}
+							}
 							client_manager->removeClient(poll_fds[i].fd);
 							std::cout << "Client disconnected (fd=" << poll_fds[i].fd << ")" << std::endl;
+							std::cout << "Client quit (fd=" << poll_fds[i].fd << ")" << std::endl;
 							poll_fds.erase(poll_fds.begin() + i);
 							--i;
 						}
@@ -174,6 +201,16 @@ void server::run()
 								client->handleClientMessage(msg, channel_manager, client_manager);
 								// If the client marked itself for quit, remove it and its pollfd here
 								if (client->shouldQuit()) {
+									Channel* ch;
+									std::map<std::string, Channel*>& all = channel_manager->getAllChannels();
+									for (std::map<std::string, Channel*>::iterator it = all.begin(); it != all.end(); ++it) {
+										ch = it->second;
+										if (ch->isMember(poll_fds[i].fd)) {
+											ch->removeMember(poll_fds[i].fd, client_manager, true);
+											std::string quitMsg = ":" + (client->getNick().empty() ? std::string("*") : client->getNick()) + "!" + client->getUser() + "@" + client->getHost() + " QUIT\r\n";
+											ch->broadcast(quitMsg, client_manager, poll_fds[i].fd);
+										}
+									}
 									client_manager->removeClient(poll_fds[i].fd);
 									std::cout << "Client quit (fd=" << poll_fds[i].fd << ")" << std::endl;
 									poll_fds.erase(poll_fds.begin() + i);
@@ -193,6 +230,30 @@ void server::run()
 
 		}
 	}
+
+	// Graceful shutdown: notify clients and remove them
+	std::cout << "Shutting down server..." << std::endl;
+	if (client_manager) {
+		std::vector<int> fds;
+		std::map<int, Client*>& all = client_manager->getAllClients();
+		for (std::map<int, Client*>::iterator it = all.begin(); it != all.end(); ++it) {
+			fds.push_back(it->first);
+		}
+		for (size_t i = 0; i < fds.size(); ++i) {
+			Client* c = client_manager->getClientByFd(fds[i]);
+			if (c) {
+				std::string notice = ":localhost NOTICE " + (c->getNick().empty() ? std::string("*") : c->getNick()) + " :Server is shutting down\r\n";
+				send(c->getFd(), notice.c_str(), notice.size(), 0);
+			}
+			client_manager->removeClient(fds[i]);
+		}
+	}
+	// Close listening socket
+	if (server_fd != -1) {
+		close(server_fd);
+		server_fd = -1;
+	}
+	poll_fds.clear();
 }
 server::~server()
 {
@@ -206,4 +267,5 @@ server::~server()
 		close(server_fd);
 	}
 	delete client_manager;
+	delete channel_manager;
 }

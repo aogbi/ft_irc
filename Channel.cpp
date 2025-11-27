@@ -1,5 +1,4 @@
 #include "Channel.hpp"
-#include "Client.hpp"
 
 // Constructors
 Channel::Channel()
@@ -69,9 +68,26 @@ void Channel::addClient(Client* client) {
         addMember(client->getFd(), false);
 }
 
-void Channel::removeMember(int fd) {
+void Channel::removeMember(int fd, ClientManager* client_manager, bool notify) {
     _members.erase(fd);
     _invited.erase(fd);
+    if(!notify) return;
+    std::map<int,bool>& rem2 = _members;
+		bool hasOp2 = false;
+		for (std::map<int,bool>::const_iterator mit = rem2.begin(); mit != rem2.end(); ++mit) {
+			if (mit->second) { hasOp2 = true; break; }
+		}
+		if (!hasOp2 && !rem2.empty()) {
+			int promoteFd2 = rem2.begin()->first;
+			setOperator(promoteFd2, true);
+			if (client_manager) {
+				Client* promoted2 = client_manager->getClientByFd(promoteFd2);
+				if (promoted2) {
+					std::string modeMsg2 = ":localhost MODE " + _name + " +o " + promoted2->getNick() + "\r\n";
+					broadcast(modeMsg2, client_manager, -1);
+				}
+			}
+		}
 }
 
 std::map<int,bool>& Channel::getMembers() {
@@ -119,4 +135,15 @@ void Channel::inviteUser(int fd) {
 
 void Channel::clearInvite(int fd) {
     _invited.erase(fd);
+}
+
+void Channel::broadcast(const std::string& msg, ClientManager* cm, int exceptFd) const {
+    if (!cm) return;
+    for (std::map<int,bool>::const_iterator it = _members.begin(); it != _members.end(); ++it) {
+        int memberFd = it->first;
+        if (exceptFd >= 0 && memberFd == exceptFd) continue;
+        Client* c = cm->getClientByFd(memberFd);
+        if (!c) continue;
+        send(c->getFd(), msg.c_str(), msg.size(), 0);
+    }
 }

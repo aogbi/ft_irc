@@ -48,7 +48,7 @@ public:
 
     // --- Message handling
     void handlePassword(const std::string &pass, ClientManager *client_manager);
-    void handleNick(const std::string &nick, ClientManager *client_manager);
+    void handleNick(const std::string &nick, ChannelManager *channel_manager, ClientManager *client_manager);
     void handleUser(const std::string &user, ClientManager *client_manager);
     void handleJoin(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);
     void handlePart(const std::string &params, ChannelManager *channel_manager, ClientManager *client_manager);

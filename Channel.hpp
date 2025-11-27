@@ -3,7 +3,10 @@
 
 #include <string>
 #include <map>
+#include "Client.hpp"
+#include "ClientManager.hpp"
 #include <set>
+
 class Client; // forward declaration
 
 class Channel {
@@ -40,7 +43,7 @@ public:
     // Member operations
     void addMember(int fd, bool isOp);
     void addClient(Client* client); // convenience method
-    void removeMember(int fd);
+    void removeMember(int fd, ClientManager* client_manager, bool notify);
     std::map<int,bool>& getMembers();
 
     // Topic
@@ -56,6 +59,8 @@ public:
     // Invite
     void inviteUser(int fd);
     void clearInvite(int fd);
+    // Broadcast a raw message to channel members. If exceptFd >= 0, that member will be skipped.
+    void broadcast(const std::string& msg, class ClientManager* cm, int exceptFd = -1) const;
 };
 
 #endif

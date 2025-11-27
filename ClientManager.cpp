@@ -5,7 +5,7 @@ ClientManager::ClientManager(std::string &serverPassword) : _serverPassword(serv
 
 ClientManager::~ClientManager() {
     // Clean up all client objects
-    std::map<int, Client*>::iterator it;
+    std::map<int, Client*>::iterator it = _clients.begin();
     for (it = _clients.begin(); it != _clients.end(); ++it) {
         delete it->second;
     }
